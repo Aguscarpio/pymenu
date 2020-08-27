@@ -199,26 +199,3 @@ class Action(Option):
     def execute(self):
         for func in self.funcs:
             func()
-
-#-------------TESTEO----------------
-#  def hola():
-    #  print("hola")
-
-#  def chau():
-    #  print("chau")
-
-#  def ladrar():
-    #  print("guau!")
-
-#  saludo = Action("saludo", hola)
-#  despedida = Action("despedida", chau)
-#  completo = Action("completo", hola, chau)
-#  ladrido = Action("ladrido", ladrar)
-
-
-#  main = Menu("main",
-        #  [Menu("saludos",
-            #  [saludo, despedida, completo]),
-        #  ladrido])
-
-#  main.navigate()
