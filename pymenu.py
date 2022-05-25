@@ -1,5 +1,6 @@
 from typing import Iterable, Callable
 import os, sys
+import inspect
 
 def clear():
     """Clear the console"""
@@ -7,7 +8,8 @@ def clear():
 
 # fzf and getch until line 135
 
-def fzf(options: Iterable, msg: str="", reverse: bool=False):
+def fzf(options: Iterable, msg: str="", reverse: bool=False, limit: int=15,
+        choice: int=0):
     """Live FuzzyFinder over an Iterable.
 
     Parameters
@@ -25,6 +27,7 @@ def fzf(options: Iterable, msg: str="", reverse: bool=False):
 
     if options are Menu.options, there is no return, but excecution.
     """
+    # TODO Cambiar fuzzyfinder por TheFuzz ??
     from fuzzyfinder import fuzzyfinder as ff
     import string
 
@@ -68,30 +71,45 @@ def fzf(options: Iterable, msg: str="", reverse: bool=False):
 
 
 
-    valid_chars = string.ascii_lowercase+"0123456789"+string.ascii_uppercase+" ,.;:-_´áéíóúñ"
+    valid_chars = string.ascii_lowercase+"0123456789"+string.ascii_uppercase+" ,.;:-_´áéíóúñÁÉÍÓÚ"
     substr, ch = "", ""
-    choice = 0
+    # Convert Menu.options to readable option.labels if necessary
+    opt_list = []
+    pickstringlist = []
+    for opt in options:
+        # TODO type Option?
+        if hasattr(opt,"label"):
+            pickstring = ""
+            if hasattr(opt,"picked"):
+                if opt.picked:
+                    pickstring = " [X]"
+                else:
+                    pickstring = " [ ]"
+            opt_list.append(opt.label)
+            pickstringlist.append(pickstring)
+    pickdict = dict(zip(opt_list,pickstringlist))
+
+    #  choice = 0
     while True:
+        candidates = list(ff(substr, opt_list))
         prevch = ch
         clear()
         if reverse:
             print(msg+substr)
-        # Convert Menu.options to readable option.labels if necessary
-        if type(options[0]) in [Menu,Action]:
-            candidates = list(ff(substr, [opt.label for opt in options]))
-        else:
-            candidates = list(ff(substr, options))
-        if len(candidates)>20: # Limit (adapt to screen size)
-            candidates = candidates[:20]
+        if len(candidates)>limit: # Limit (adapt to screen size)
+            candidates = candidates[:limit]
         for cand in candidates:
             if cand==candidates[choice]:
-                print(f"\033[92m{cand}\033[0m") # Green color for chosen option
+                print(f"\033[92m> {cand+pickdict[cand]}\033[0m") # Green color for chosen option
             else:
-                print(cand)
+                print(cand+pickdict[cand])
         if not reverse:
             print(msg+substr)
 
         ch = getch()
+        if type(ch)!=str and ch not in ['\x1b', '[']: # correct bad encoding
+            ch = ch.decode('utf-8')
+
         if ch=='\r':# Choose option with Enter
             chosen = candidates[choice]
             break
@@ -100,6 +118,10 @@ def fzf(options: Iterable, msg: str="", reverse: bool=False):
             if choice>=len(candidates):
                 choice=0 # Ciclic
             continue
+
+        elif ch=='C' and prevch=='[': # Choose option with right key
+            chosen = candidates[choice]
+            break
         elif ch=='B' and prevch=='[': # Navigate Down
             choice += 1
             if choice>=len(candidates):
@@ -124,20 +146,22 @@ def fzf(options: Iterable, msg: str="", reverse: bool=False):
     clear()
 
     # navigate Menu or excecute Action if options are Menu.options
-    if type(options[0]) in [Menu,Action]:
+    # TODO if is Option
+    if type(options[0]) in [Menu,Action,Pick]:
         for opt in options:
             if opt.label==chosen:
                 opt.choose()
                 break
         return
 
-    return chosen
+    return choice
 
 
 # Here the magic begins
 
 class Option:
-    """General class to represent a single option inside a Menu"""
+    """ General class to represent a single option inside a Menu
+    """
     def __init__(self, label: str, terminal: bool=True, prev='root'):
         self.label = label
         self.terminal = terminal
@@ -146,8 +170,10 @@ class Option:
     def choose(self):
         if type(self)==Menu:
             self.navigate()
-        if type(self)==Action:
+        elif type(self)==Action:
             self.execute()
+        elif type(self)==Pick:
+            self.pick()
 
     def back(self): # Go back to previous Menu
         if self.prev=='root': # if root -> exit program
@@ -168,13 +194,16 @@ class Menu(Option):
     def __init__(self, label: str, options: Iterable):
         Option.__init__(self, label, terminal=False)
         self.options = list(options)
+        self.picks = []
 
         # prev attribute of all options setted to Menu
         for opt in options:
             opt.prev = self
 
-    def navigate(self):
-        fzf(self.options)
+    # TODO **kwargs
+    def navigate(self, choice=0, limit=25, title="", reverse=False):
+        return fzf(self.options, choice=choice, limit=limit, msg=title,
+                reverse=reverse)
 
     def tree_view(self, tabbing: int=0):
         """Method to see nested tree structure of Menus"""
@@ -198,4 +227,29 @@ class Action(Option):
         self.funcs = funcs
     def execute(self):
         for func in self.funcs:
-            func()
+            funcargs = inspect.getfullargspec(func).args
+            if len(funcargs)==0:
+                func()
+            else:
+                func(self)
+
+class Pick(Option):
+    """
+    A class used to create a pickable Option object.
+
+    Picks are inside Menus and can be picked/unpicked (change bw True/False)
+    """
+    def __init__(self, label: str, picked=False):
+        Option.__init__(self, label)
+        self.picked = picked
+    def pick(self, keep=True):
+        self.picked = not(self.picked)
+        if self.picked:
+            self.prev.picks.append(self.label)
+        else:
+            self.prev.picks.remove(self.label)
+
+        #  self.prev.navigate(choice=self.prev.options.index(self))
+        if keep:
+            self.prev.navigate(choice=sorted(self.prev.options, key=lambda x: x.label).index(self))
+
